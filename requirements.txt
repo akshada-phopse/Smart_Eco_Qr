@@ -1,0 +1,5 @@
+Flask
+qrcode
+mysql-connector-python
+cloudinary
+gunicorn
