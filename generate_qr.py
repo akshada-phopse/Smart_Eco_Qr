@@ -1,10 +1,13 @@
-import sys
+from flask import Flask, request, jsonify
 import qrcode
 import mysql.connector
 import json
 import cloudinary
 import cloudinary.uploader
 from datetime import datetime
+import os
+
+app = Flask(__name__)
 
 # Cloudinary Configuration
 cloudinary.config(
@@ -26,7 +29,6 @@ def insert_qr_code_path(pass_id, qr_code_url):
     conn = db_connect()
     cursor = conn.cursor()
     try:
-        # Update the pass table with the QR code URL
         update_query = "UPDATE pass SET qr_code_path = %s WHERE pass_id = %s"
         cursor.execute(update_query, (qr_code_url, pass_id))
         conn.commit()
@@ -37,7 +39,6 @@ def insert_qr_code_path(pass_id, qr_code_url):
         conn.close()
 
 def generate_qr_code(pass_id, user_id, destination, start_date, end_date):
-    # Prepare the QR code data in JSON format
     qr_data = json.dumps({
         "pass_id": pass_id,
         "user_id": user_id,
@@ -45,9 +46,8 @@ def generate_qr_code(pass_id, user_id, destination, start_date, end_date):
         "start_date": start_date,
         "end_date": end_date
     })
-    qr_code_path = f"{user_id}_{pass_id}.png"
+    qr_code_filename = f"{user_id}_{pass_id}.png"
     
-    # Generate QR Code
     qr = qrcode.QRCode(
         version=1,
         error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -57,26 +57,42 @@ def generate_qr_code(pass_id, user_id, destination, start_date, end_date):
     qr.add_data(qr_data)
     qr.make(fit=True)
 
-    # Create an image from the QR Code instance
     img = qr.make_image(fill_color="black", back_color="white")
+    img.save(qr_code_filename)
 
-    # Save QR code locally
-    img.save(qr_code_path)
-
-    # Upload QR to Cloudinary
-    upload_result = cloudinary.uploader.upload(qr_code_path)
+    upload_result = cloudinary.uploader.upload(qr_code_filename)
     qr_code_url = upload_result.get("secure_url")
 
-    # Insert Cloudinary QR code URL into the database
+    # Clean up local file after upload
+    if os.path.exists(qr_code_filename):
+        os.remove(qr_code_filename)
+
     insert_qr_code_path(pass_id, qr_code_url)
 
-if __name__ == "__main__":
-    # Command line arguments
-    pass_id = sys.argv[1]
-    user_id = sys.argv[2]
-    destination = sys.argv[3]
-    start_date = sys.argv[4]
-    end_date = sys.argv[5]
+    return qr_code_url
 
-    # Call the function to generate and upload QR code
-    generate_qr_code(pass_id, user_id, destination, start_date, end_date)
+@app.route('/generate_qr', methods=['POST'])
+def handle_generate_qr():
+    try:
+        data = request.json
+        pass_id = data['pass_id']
+        user_id = data['user_id']
+        destination = data['destination']
+        start_date = data['start_date']
+        end_date = data['end_date']
+
+        qr_code_url = generate_qr_code(pass_id, user_id, destination, start_date, end_date)
+
+        return jsonify({
+            "status": "success",
+            "message": "QR code generated and uploaded.",
+            "qr_code_url": qr_code_url
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
